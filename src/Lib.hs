@@ -1,5 +1,6 @@
 module Lib
   ( parseRegex
+  , specialChars
   ) where
 
 import Text.Read (readMaybe)
@@ -69,11 +70,14 @@ group :: Parser Regex
 group = Group <$> between (char '(') (char ')') regex
 
 range :: Parser Regex
-range = do
-  rng <- between (char '[') (char ']') lit
-  return $ Range rng
+range = Range <$> between (char '[') (char ']') (many1 (try span' <|> lit))
   where
-    lit = many1 (notFollowedBy (char '-') *> noneOf specialChars)
+    lit = Singleton <$> noneOf "]"
+    span' = do
+      start <- noneOf "]"
+      _ <- char '-'
+      end <- noneOf "]"
+      return $ Span start end
 
 atom :: Parser Regex
 atom = Atom <$> anyChar
