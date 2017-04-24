@@ -1,22 +1,23 @@
 module Regex.Parse
   ( parseRegex
-  , specialChars
+  , RegexToken(..)
   ) where
 
 import Text.Read (readMaybe)
 import Text.Parsec
 import Text.Parsec.String
 
-data Regex
+data RegexToken
   = Wildcard
   | Atom Char
   | Range [CharClass]
   | Start
   | End
-  | Group [Regex]
+  | Group [RegexToken]
   | Star
   | Plus
   | Optional
+  | Alternation
   | Repetition Int
                (Maybe Int)
   | BackRef Int
@@ -28,25 +29,25 @@ data CharClass
          Char
   deriving (Show)
 
-specialChars :: String
-specialChars = "\\.[]{}()*+?|^$"
+parseRegex :: String -> Either ParseError [RegexToken]
+parseRegex = runParser regex () "RegexToken"
 
-parseRegex :: String -> Either ParseError [Regex]
-parseRegex = runParser regex () "Regex"
+regex :: Parser [RegexToken]
+regex = many $ choice [escaped, group, anchor, wildcard, range, alternation, star, plus, opt, repetition, atom]
 
-regex :: Parser [Regex]
-regex = many $ choice [escaped, group, anchor, wildcard, range, star, plus, opt, repetition, atom]
+alternation :: Parser RegexToken
+alternation = char '|' *> return Alternation
 
-star :: Parser Regex
+star :: Parser RegexToken
 star = char '*' *> return Star
 
-plus :: Parser Regex
+plus :: Parser RegexToken
 plus = char '+' *> return Plus
 
-opt :: Parser Regex
+opt :: Parser RegexToken
 opt = char '?' *> return Optional
 
-repetition :: Parser Regex
+repetition :: Parser RegexToken
 repetition =
   between (char '{') (char '}') $
   do start <- read <$> many1 digit
@@ -57,19 +58,19 @@ repetition =
           readMaybe <$> many digit
      return $ Repetition start end
 
-wildcard :: Parser Regex
+wildcard :: Parser RegexToken
 wildcard = char '.' >> return Wildcard
 
-anchor :: Parser Regex
+anchor :: Parser RegexToken
 anchor = start <|> end
   where
     start = char '^' *> return Start
     end = char '$' *> return End
 
-group :: Parser Regex
+group :: Parser RegexToken
 group = Group <$> between (char '(') (char ')') regex
 
-range :: Parser Regex
+range :: Parser RegexToken
 range = Range <$> between (char '[') (char ']') (many1 (try span' <|> lit))
   where
     lit = Singleton <$> noneOf "]"
@@ -79,10 +80,10 @@ range = Range <$> between (char '[') (char ']') (many1 (try span' <|> lit))
       end <- noneOf "]"
       return $ Span start end
 
-atom :: Parser Regex
+atom :: Parser RegexToken
 atom = Atom <$> anyChar
 
-escaped :: Parser Regex
+escaped :: Parser RegexToken
 escaped = char '\\' *> (backRef <|> atom)
   where
     backRef = BackRef . read <$> many1 digit
