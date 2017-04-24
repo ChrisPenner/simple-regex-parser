@@ -1,9 +1,8 @@
 module Regex.Compile
-  ( compile
-  , RegexPattern(..)
+  ( RegexPattern(..)
   ) where
 
-import Regex.Parse
+-- import Regex.Parse
 
 data RegexPattern
   = ManyOf RegexPattern
@@ -11,5 +10,5 @@ data RegexPattern
   | Singleton RegexPattern
   | Optional RegexPattern
 
-compile :: [RegexToken] -> RegexPattern
-compile = undefined
+-- compile :: [RegexToken] -> RegexPattern
+-- compile = undefined

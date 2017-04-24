@@ -1,89 +1,83 @@
 module Regex.Parse
   ( parseRegex
-  , RegexToken(..)
+  , Structure(..)
   ) where
 
 import Text.Read (readMaybe)
 import Text.Parsec
 import Text.Parsec.String
 
-data RegexToken
-  = Wildcard
+data Structure
+  = Group Structure
+  | Terms [Structure]
+  | OneOf [Structure]
+  | Repetition Structure Int (Maybe Int)
+  | BackRef Int
+  | Range String
+  | Wildcard
   | Atom Char
-  | Range [CharClass]
   | Start
   | End
-  | Group [RegexToken]
-  | Star
-  | Plus
-  | Optional
-  | Alternation
-  | Repetition Int
-               (Maybe Int)
-  | BackRef Int
   deriving (Show)
 
-data CharClass
-  = Singleton Char
-  | Span Char
-         Char
-  deriving (Show)
+specialChars :: String
+specialChars = "\\[]|{}().+*?"
 
-parseRegex :: String -> Either ParseError [RegexToken]
-parseRegex = runParser regex () "RegexToken"
+parseRegex :: String -> Either ParseError Structure
+parseRegex = runParser regex () "Regex"
 
-regex :: Parser [RegexToken]
-regex = many $ choice [escaped, group, anchor, wildcard, range, alternation, star, plus, opt, repetition, atom]
+regex :: Parser Structure
+regex = structure <* eof
 
-alternation :: Parser RegexToken
-alternation = char '|' *> return Alternation
+structure :: Parser Structure
+structure = OneOf <$> terms `sepBy1` char '|'
 
-star :: Parser RegexToken
-star = char '*' *> return Star
+terms :: Parser Structure
+terms = Terms <$> many1 term
 
-plus :: Parser RegexToken
-plus = char '+' *> return Plus
+term :: Parser Structure
+term = do
+  re <- choice [group, range, token']
+  option re (quantifier re <|> repetition re)
 
-opt :: Parser RegexToken
-opt = char '?' *> return Optional
+quantifier :: Structure -> Parser Structure
+quantifier re = do
+  c <- oneOf "?*+"
+  return $ case c of
+             '?' -> Repetition re 0 (Just 1)
+             '*' -> Repetition re 0 Nothing
+             '+' -> Repetition re 1 Nothing
+             _ -> error "Impossible pattern match fail"
 
-repetition :: Parser RegexToken
-repetition =
-  between (char '{') (char '}') $
-  do start <- read <$> many1 digit
-     end <-
-       option Nothing $
-       do _ <- char ','
-          spaces
-          readMaybe <$> many digit
-     return $ Repetition start end
+repetition :: Structure -> Parser Structure
+repetition re =
+  between (char '{') (char '}') $ do
+    start <- read <$> many1 digit
+    end <- option Nothing $ do
+      _ <- char ','
+      spaces
+      readMaybe <$> many digit
+    return $ Repetition re start end
 
-wildcard :: Parser RegexToken
-wildcard = char '.' >> return Wildcard
+group :: Parser Structure
+group = Group <$> between (char '(') (char ')') structure
 
-anchor :: Parser RegexToken
-anchor = start <|> end
+token' :: Parser Structure
+token' = start <|> end <|> wildcard <|> atom <|> try escaped <|> backRef
   where
     start = char '^' *> return Start
     end = char '$' *> return End
+    wildcard = char '.' *> return Wildcard
+    atom = Atom <$> noneOf specialChars
+    escaped = Atom <$> (char '\\' *> oneOf specialChars)
+    backRef = BackRef . read <$> (char '\\' *> many1 digit)
 
-group :: Parser RegexToken
-group = Group <$> between (char '(') (char ')') regex
-
-range :: Parser RegexToken
-range = Range <$> between (char '[') (char ']') (many1 (try span' <|> lit))
+range :: Parser Structure
+range = Range . concat <$> between (char '[') (char ']') (many1 (try span' <|> lit))
   where
-    lit = Singleton <$> noneOf "]"
+    lit = (:[]) <$> noneOf "]"
     span' = do
       start <- noneOf "]"
       _ <- char '-'
       end <- noneOf "]"
-      return $ Span start end
-
-atom :: Parser RegexToken
-atom = Atom <$> anyChar
-
-escaped :: Parser RegexToken
-escaped = char '\\' *> (backRef <|> atom)
-  where
-    backRef = BackRef . read <$> many1 digit
+      return [start..end]
