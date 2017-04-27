@@ -13,7 +13,6 @@ data Expr
   | OneOf [Expr]
   | Repetition Expr Int (Maybe Int)
   | BackRef Int
-  | Range String
   | Wildcard
   | Atom Char
   | Start
@@ -73,11 +72,12 @@ token' = start <|> end <|> wildcard <|> atom <|> try escaped <|> backRef
     backRef = BackRef . read <$> (char '\\' *> many1 digit)
 
 range :: Parser Expr
-range = Range . concat <$> between (char '[') (char ']') (many1 (try span' <|> lit))
-  where
-    lit = (:[]) <$> noneOf "]"
-    span' = do
-      start <- noneOf "]"
-      _ <- char '-'
-      end <- noneOf "]"
-      return [start..end]
+range = OneOf . fmap Atom <$> possibleChars
+  where ranges = concat <$> many1 (try span' <|> lit)
+        possibleChars = between (char '[') (char ']') ranges
+        lit = (:[]) <$> noneOf "]"
+        span' = do
+          start <- noneOf "]"
+          _ <- char '-'
+          end <- noneOf "]"
+          return [start..end]
