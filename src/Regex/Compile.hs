@@ -1,45 +1,53 @@
-module Regex.Compile
-  ( match
-  ) where
+{-# language TemplateHaskell #-}
+{-# language GeneralizedNewtypeDeriving #-}
+module Regex.Compile where
 
 import Regex.Parse
--- import Data.Foldable
-import Control.Monad.State
+-- import Control.Monad.State
+import List.Transformer
+import Control.Lens
+import Data.Monoid
 
--- import Text.Parsec.Error
 
-data RState = RState
-  { current :: String
-  , groups :: Groups
-  , leftover :: String
-  }
-
+type Groups = [String]
 type Leftover = String
 type Current = String
-type Match = (Groups, Current, String)
--- type Pattern = String
-type Groups = [String]
 
--- match :: Pattern -> String -> Either ParseError Match
--- match pattern str = flip match' str <$> parseRegex pattern
+data RState = RState
+  { _current :: String
+  , _groups :: Groups
+  , _leftover :: String
+  } deriving Show
 
+makeLenses ''RState
 
+-- newtype RCompile m a =
+--   RCompile (ListT m a)
+--   deriving (Functor, Applicative, Monad)
 
-match :: Expr -> Groups -> String -> [Match]
-match (Atom c) groups (x:xs)
-  | c == x = [(groups, [x], xs)]
-  | otherwise = []
-match Wildcard groups (x:xs) = [(groups, [x], xs)]
-match (OneOf terms) groups str = do
-  term <- terms
-  match term groups str
+getMatch :: ListT Identity RState -> Maybe RState
+getMatch (ListT (Identity (Cons x _))) = Just x
+getMatch _ = Nothing
 
-match (Group next) groups str = fmap addGroup $ match next groups str
-  where addGroup (grps, cur, leftover) = (grps ++ [cur], cur, leftover)
+getMatches :: ListT Identity RState -> [RState]
+getMatches = filter (null . _leftover) . getMatches'
 
-match (Terms terms) groups str = foldl go [(groups, "", str)] terms
-  where go matches term = do
-            (grps, cur, leftover) <- matches
-            (grps', cur', leftover') <- match term grps leftover
-            return (grps', cur++cur', leftover')
-match _ _ [] = []
+getMatches' :: ListT Identity RState -> [RState]
+getMatches' = runIdentity . fold (\acc x -> acc ++ [x]) [] id
+
+match :: Expr -> RState -> ListT Identity RState
+match (Atom c) (RState cur grps (x:xs)) | c == x =
+  return (RState (cur <> [c]) grps xs)
+
+match Wildcard (RState cur grps (x:xs)) = return (RState (cur <> [x]) grps xs)
+match (OneOf terms) rstate = select terms >>= flip match rstate
+match (Group nxt) rstate = addGroup <$> match nxt rstate
+  where addGroup (RState cur grps lft) = RState cur (grps ++ [cur]) lft
+
+-- match (Terms terms) groups str = foldl go [(groups, "", str)] terms
+--   where go matches term = do
+--             (grps, cur, leftover) <- matches
+--             (grps', cur', leftover') <- match term grps leftover
+--             return (grps', cur++cur', leftover')
+-- match _ _ [] = []
+match _ _ = empty
