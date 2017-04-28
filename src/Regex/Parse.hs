@@ -4,7 +4,7 @@ module Regex.Parse
   ) where
 
 import Text.Read (readMaybe)
-import Text.Parsec hiding (State)
+import Text.Parsec hiding (State, Empty)
 import Control.Monad.State
 
 type Parser = ParsecT String () (State Int) Expr
@@ -14,6 +14,7 @@ data Expr
   | Terms [Expr]
   | OneOf [Expr]
   | Repetition Expr Int (Maybe Int)
+  | Empty
   | BackRef Int
   | Wildcard
   | Atom Char
@@ -45,8 +46,8 @@ quantifier :: Expr -> Parser
 quantifier re = do
   c <- oneOf "?*+"
   return $ case c of
-             '?' -> Repetition re 0 (Just 1)
-             '*' -> Repetition re 0 Nothing
+             '?' -> OneOf [Empty, re]
+             '*' -> OneOf [Empty, Repetition re 1 Nothing]
              '+' -> Repetition re 1 Nothing
              _ -> error "Impossible pattern match fail"
 
@@ -58,7 +59,9 @@ repetition re =
       _ <- char ','
       spaces
       readMaybe <$> many digit
-    return $ Repetition re start end
+    return $ if start == 0
+                  then OneOf [Empty, Repetition re start end]
+                  else Repetition re start end
 
 group :: Parser
 group = do

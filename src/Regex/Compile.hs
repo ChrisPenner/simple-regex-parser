@@ -7,11 +7,11 @@ import Control.Monad.State
 import List.Transformer as LT
 import Data.List
 import Data.Foldable (asum)
-import Control.Lens
+import Control.Lens hiding (Empty)
 import Data.Monoid
 import qualified Data.IntMap as IM
 
--- import Text.Parsec.Error
+import Text.Parsec.Error
 
 type Groups = IM.IntMap String
 type Pattern = String
@@ -23,18 +23,8 @@ data RState = RState
 
 makeLenses ''RState
 
--- compile :: Pattern -> String -> Either ParseError (Maybe String)
--- compile pat str = fst . flip getMatch str <$> parseRegex pat
-
--- getMatch :: Expr -> String -> [(String, RState)]
--- getMatch expr str = flip evalState (RState [] str) $ do
---   result <- next lst
---   case result of
---     Nil -> return []
---     (Cons x rest) -> do
---       st <- get
---       ((x, st):) <$> next rest
---     where lst = match expr
+compile :: Pattern -> String -> Either ParseError [(String, RState)]
+compile pat str = flip evalState (RState IM.empty str) . getMatches <$> parseRegex pat
 
 getMatches :: Expr -> State RState [(String, RState)]
 getMatches expr = LT.foldM go def toM $ match expr
@@ -49,39 +39,6 @@ getMatches expr = LT.foldM go def toM $ match expr
       return $ if null $ _leftover st
                   then (nxt, st):acc
                   else acc
-
-  -- (RState [] str) $ do
-  -- result <- next lst
-  -- return $ case result of
-  --            (Cons x _) -> Just x
-  --            _ -> Nothing
-  --   where lst = match expr
-
-
-
-
--- getMatches :: Expr -> String -> (Maybe String)
--- getMatches expr str = flip runState (RState [] str) $ do
---   result <- next lst
---   return $ case result of
---              (Cons x _) -> Just x
---              _ -> Nothing
---     where lst = match expr
-
-
-
-
--- getMatches :: Expr -> String -> ([String], RState)
--- getMatches expr str = flip runState (RState [] str) $ do
---   result <- next lst
---   recurse result
---     where
---       lst = match expr
---       recurse (Cons x xs) = do
---         ys <- next xs >>= recurse
---         return (x:ys)
---       recurse Nil = return []
--- getMatch (Repetition (Atom 'a') 10 Nothing) "aaaaaa"
 
 match :: Expr -> ListT (State RState) String
 match (Atom c) = do
@@ -130,18 +87,19 @@ match (BackRef n) = do
 
 
 -- Match with longest sequences first; i.e. be greedy
-match (Repetition _ 0 (Just 0)) = pure ""
-match (Repetition term 0 mEnd) = go
+match (Repetition _ _ (Just 0)) = empty
+match (Repetition term 1 mEnd) = go
   where
     go = do
       m <- match term
       st <- get
-      (mappend m <$> match (Repetition term 0 (subtract 1 <$> mEnd))) <|> (put st >> pure m)
+      (mappend m <$> match (Repetition term 1 (subtract 1 <$> mEnd)))
+        <|> (put st >> pure m)
 
 match (Repetition term start mEnd) = do
   m <- match term
-  recursed <- match (Repetition term (start - 1) (subtract 1 <$> mEnd))
-  return $ m <> recursed
+  mappend m <$> match (Repetition term (start - 1) (subtract 1 <$> mEnd))
 
+match Empty = pure ""
 
 match _ = empty
