@@ -4,11 +4,13 @@ module Regex.Parse
   ) where
 
 import Text.Read (readMaybe)
-import Text.Parsec
-import Text.Parsec.String
+import Text.Parsec hiding (State)
+import Control.Monad.State
+
+type Parser = ParsecT String () (State Int) Expr
 
 data Expr
-  = Group Expr
+  = Group Int Expr
   | Terms [Expr]
   | OneOf [Expr]
   | Repetition Expr Int (Maybe Int)
@@ -23,23 +25,23 @@ specialChars :: String
 specialChars = "\\[]|{}().+*?"
 
 parseRegex :: String -> Either ParseError Expr
-parseRegex = runParser regex () "Regex"
+parseRegex = flip evalState 1 . runParserT regex () "Regex"
 
-regex :: Parser Expr
+regex :: Parser
 regex = expr <* eof
 
-expr :: Parser Expr
+expr :: Parser
 expr = OneOf <$> terms `sepBy1` char '|'
 
-terms :: Parser Expr
+terms :: Parser
 terms = Terms <$> many1 term
 
-term :: Parser Expr
+term :: Parser
 term = do
   re <- choice [group, range, token']
   option re (quantifier re <|> repetition re)
 
-quantifier :: Expr -> Parser Expr
+quantifier :: Expr -> Parser
 quantifier re = do
   c <- oneOf "?*+"
   return $ case c of
@@ -48,7 +50,7 @@ quantifier re = do
              '+' -> Repetition re 1 Nothing
              _ -> error "Impossible pattern match fail"
 
-repetition :: Expr -> Parser Expr
+repetition :: Expr -> Parser
 repetition re =
   between (char '{') (char '}') $ do
     start <- read <$> many1 digit
@@ -58,10 +60,14 @@ repetition re =
       readMaybe <$> many digit
     return $ Repetition re start end
 
-group :: Parser Expr
-group = Group <$> between (char '(') (char ')') expr
+group :: Parser
+group = do
+  i <- get
+  modify (+1)
+  res <- between (char '(') (char ')') expr
+  return $ Group i res
 
-token' :: Parser Expr
+token' :: Parser
 token' = start <|> end <|> wildcard <|> atom <|> try escaped <|> backRef
   where
     start = char '^' *> return Start
@@ -71,7 +77,7 @@ token' = start <|> end <|> wildcard <|> atom <|> try escaped <|> backRef
     escaped = Atom <$> (char '\\' *> oneOf specialChars)
     backRef = BackRef . read <$> (char '\\' *> many1 digit)
 
-range :: Parser Expr
+range :: Parser
 range = OneOf . fmap Atom <$> possibleChars
   where ranges = concat <$> many1 (try span' <|> lit)
         possibleChars = between (char '[') (char ']') ranges

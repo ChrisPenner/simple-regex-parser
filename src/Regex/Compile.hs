@@ -9,10 +9,11 @@ import Data.List
 import Data.Foldable (asum)
 import Control.Lens
 import Data.Monoid
+import qualified Data.IntMap as IM
 
 -- import Text.Parsec.Error
 
-type Groups = [String]
+type Groups = IM.IntMap String
 type Pattern = String
 
 data RState = RState
@@ -100,9 +101,9 @@ match (OneOf terms) = do
   let try t = put st >> match t
   asum (try <$> terms)
 
-match (Group term) = do
+match (Group n term) = do
   theMatch <- match term
-  groups <>= [theMatch]
+  groups . at n ?= theMatch
   return theMatch
 
 match (Terms terms) =
@@ -134,17 +135,12 @@ match (Repetition term 0 mEnd) = go
   where
     go = do
       m <- match term
-      grps <- use groups
       st <- get
-      results <- (mappend m <$> match (Repetition term 0 (subtract 1 <$> mEnd))) <|> (put st >> pure m)
-      groups .= grps
-      return results
+      (mappend m <$> match (Repetition term 0 (subtract 1 <$> mEnd))) <|> (put st >> pure m)
 
 match (Repetition term start mEnd) = do
   m <- match term
-  grps <- use groups
   recursed <- match (Repetition term (start - 1) (subtract 1 <$> mEnd))
-  groups .= grps
   return $ m <> recursed
 
 
