@@ -23,11 +23,17 @@ data RState = RState
 
 makeLenses ''RState
 
-compile :: Pattern -> String -> Either (ParseError Char Dec) [(String, RState)]
+compile :: Pattern -> String -> Either (ParseError Char Dec) [String]
 compile pat str = flip evalState (RState IM.empty str) . getMatches <$> parseRegex pat
 
-getMatches :: Expr -> State RState [(String, RState)]
-getMatches expr = LT.foldM go def toM $ match expr
+compile' :: Pattern -> String -> Either (ParseError Char Dec) [(String, RState)]
+compile' pat str = flip evalState (RState IM.empty str) . getMatches' <$> parseRegex pat
+
+getMatches :: Expr -> State RState [String]
+getMatches = fmap (fmap fst) . getMatches'
+
+getMatches' :: Expr -> State RState [(String, RState)]
+getMatches' expr = LT.foldM go def toM $ match expr
   where
     toM :: [(String, RState)] -> State RState [(String, RState)]
     toM = return

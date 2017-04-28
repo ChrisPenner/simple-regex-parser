@@ -69,8 +69,7 @@ repetition re =
 group :: Parser Expr
 group = do
   i <- get
-  modify (+1)
-  res <- between (char '(') (char ')') expr
+  res <- between (char '(') (char ')') (modify (+1) *> expr)
   return $ Group i res
 
 token' :: Parser Expr
