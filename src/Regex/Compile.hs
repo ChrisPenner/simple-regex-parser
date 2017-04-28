@@ -5,7 +5,8 @@ module Regex.Compile where
 import Regex.Parse
 import Control.Monad.State
 import List.Transformer as LT
-import Data.List
+import Data.List as L
+import Data.Maybe
 import Data.Foldable (asum)
 import Control.Lens hiding (Empty)
 import Data.Monoid
@@ -22,6 +23,34 @@ data RState = RState
   } deriving Show
 
 makeLenses ''RState
+
+-- allMatches :: Pattern -> String -> Either (ParseError Char Dec) [String]
+-- allMatches pat str = filter (not.null) <$> matches
+--   where matcher = compile pat
+--         matches = concatMap (L.take 1) <$> traverse matcher (tails str)
+
+allMatches :: Pattern -> String -> Either (ParseError Char Dec) [String]
+allMatches pat str =
+  case mCompiled' pat of
+    Left err -> Left err
+    Right matcher ->
+      let go "" = Nothing
+          go s =
+            case listToMaybe $ matcher s of
+              -- No matches, move on to rest of leftovers
+              Nothing -> Just (Nothing, tail s)
+              -- Empty match, move on; don't bother appending
+              Just ("", _) -> Just (Nothing, tail s)
+              -- Match! Keep matching on leftovers
+              Just (s', RState _ lft) -> Just (Just s', lft)
+
+          matches = catMaybes $ unfoldr go str
+       in Right $ filter (not.null) matches
+
+mCompiled' :: Pattern -> Either (ParseError Char Dec) (String -> [(String, RState)])
+mCompiled' pat = case parseRegex pat of
+                  Left err -> Left err
+                  Right expr -> Right (evalState (getMatches' expr) . RState IM.empty)
 
 compile :: Pattern -> String -> Either (ParseError Char Dec) [String]
 compile pat str = flip evalState (RState IM.empty str) . getMatches <$> parseRegex pat
@@ -42,9 +71,7 @@ getMatches' expr = LT.foldM go def toM $ match expr
     go :: [(String, RState)] -> String -> State RState [(String, RState)]
     go acc nxt = do
       st <- get
-      return $ if null $ _leftover st
-                  then (nxt, st):acc
-                  else acc
+      return $ (nxt, st):acc
 
 match :: Expr -> ListT (State RState) String
 match (Atom c) = do
@@ -91,15 +118,12 @@ match (BackRef n) = do
       rest' <- stripPrefix grp str
       return (grp, rest')
 
--- Match with longest sequences first; i.e. be greedy
 match (Repetition _ _ (Just 0)) = empty
 match (Repetition term 1 mEnd) = go
   where
     go = do
       m <- match term
-      st <- get
-      (mappend m <$> match (Repetition term 1 (subtract 1 <$> mEnd)))
-        <|> (put st >> pure m)
+      pure m <|> (mappend m <$> match (Repetition term 1 (subtract 1 <$> mEnd)))
 
 match (Repetition term start mEnd) = do
   m <- match term
