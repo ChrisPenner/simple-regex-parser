@@ -18,7 +18,7 @@ library
   exposed-modules:     Regex.Parse
                      , Regex.Compile
   build-depends:       base >= 4.9 && < 5
-                     , parsec
+                     , megaparsec
                      , mtl
                      , lens
                      , list-transformer

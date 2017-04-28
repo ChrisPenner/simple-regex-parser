@@ -11,7 +11,7 @@ import Control.Lens hiding (Empty)
 import Data.Monoid
 import qualified Data.IntMap as IM
 
-import Text.Parsec.Error
+import Text.Megaparsec.Error
 
 type Groups = IM.IntMap String
 type Pattern = String
@@ -23,7 +23,7 @@ data RState = RState
 
 makeLenses ''RState
 
-compile :: Pattern -> String -> Either ParseError [(String, RState)]
+compile :: Pattern -> String -> Either (ParseError Char Dec) [(String, RState)]
 compile pat str = flip evalState (RState IM.empty str) . getMatches <$> parseRegex pat
 
 getMatches :: Expr -> State RState [(String, RState)]
@@ -84,7 +84,6 @@ match (BackRef n) = do
       grp <- mGroup
       rest' <- stripPrefix grp str
       return (grp, rest')
-
 
 -- Match with longest sequences first; i.e. be greedy
 match (Repetition _ _ (Just 0)) = empty

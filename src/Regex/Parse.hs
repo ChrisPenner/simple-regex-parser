@@ -3,11 +3,11 @@ module Regex.Parse
   , Expr(..)
   ) where
 
-import Text.Read (readMaybe)
-import Text.Parsec hiding (State, Empty)
+import Text.Megaparsec hiding (State)
+import Text.Megaparsec.Lexer (integer)
 import Control.Monad.State
 
-type Parser = ParsecT String () (State Int) Expr
+type Parser = ParsecT Dec String (State Int)
 
 data Expr
   = Group Int Expr
@@ -22,27 +22,30 @@ data Expr
   | End
   deriving (Show)
 
+int :: Parser Int
+int = fromInteger <$> integer
+
 specialChars :: String
 specialChars = "\\[]|{}().+*?"
 
-parseRegex :: String -> Either ParseError Expr
-parseRegex = flip evalState 1 . runParserT regex () "Regex"
+parseRegex :: String -> Either (ParseError Char Dec) Expr
+parseRegex = flip evalState 1 . runParserT regex "Regex"
 
-regex :: Parser
+regex :: Parser Expr
 regex = expr <* eof
 
-expr :: Parser
+expr :: Parser Expr
 expr = OneOf <$> terms `sepBy1` char '|'
 
-terms :: Parser
-terms = Terms <$> many1 term
+terms :: Parser Expr
+terms = Terms <$> some term
 
-term :: Parser
+term :: Parser Expr
 term = do
   re <- choice [group, range, token']
   option re (quantifier re <|> repetition re)
 
-quantifier :: Expr -> Parser
+quantifier :: Expr -> Parser Expr
 quantifier re = do
   c <- oneOf "?*+"
   return $ case c of
@@ -51,26 +54,26 @@ quantifier re = do
              '+' -> Repetition re 1 Nothing
              _ -> error "Impossible pattern match fail"
 
-repetition :: Expr -> Parser
+repetition :: Expr -> Parser Expr
 repetition re =
   between (char '{') (char '}') $ do
-    start <- read <$> many1 digit
-    end <- option Nothing $ do
+    start <- int
+    mEnd <- option Nothing $ do
       _ <- char ','
-      spaces
-      readMaybe <$> many digit
+      space
+      optional int
     return $ if start == 0
-                  then OneOf [Empty, Repetition re start end]
-                  else Repetition re start end
+                  then OneOf [Empty, Repetition re start mEnd]
+                  else Repetition re start mEnd
 
-group :: Parser
+group :: Parser Expr
 group = do
   i <- get
   modify (+1)
   res <- between (char '(') (char ')') expr
   return $ Group i res
 
-token' :: Parser
+token' :: Parser Expr
 token' = start <|> end <|> wildcard <|> atom <|> try escaped <|> backRef
   where
     start = char '^' *> return Start
@@ -78,11 +81,11 @@ token' = start <|> end <|> wildcard <|> atom <|> try escaped <|> backRef
     wildcard = char '.' *> return Wildcard
     atom = Atom <$> noneOf specialChars
     escaped = Atom <$> (char '\\' *> oneOf specialChars)
-    backRef = BackRef . read <$> (char '\\' *> many1 digit)
+    backRef = BackRef <$> (char '\\' *> int)
 
-range :: Parser
+range :: Parser Expr
 range = OneOf . fmap Atom <$> possibleChars
-  where ranges = concat <$> many1 (try span' <|> lit)
+  where ranges = concat <$> some (try span' <|> lit)
         possibleChars = between (char '[') (char ']') ranges
         lit = (:[]) <$> noneOf "]"
         span' = do
